@@ -958,10 +958,10 @@ for ('', 'repeat_') -> $repness {
             my @children;
             my $handler := 1;
             my $orig_type;
-            my $label;
+            my $label_wval;
             for $op.list {
                 if $_.named eq 'nohandler' { $handler := 0; }
-                elsif $_.named eq 'label' { $label := $_; }
+                elsif $_.named eq 'label' { $label_wval := $_; }
                 else { nqp::push(@children, $_) }
             }
             if needs_cond_passed(@children[1]) {
@@ -1060,39 +1060,45 @@ for ('', 'repeat_') -> $repness {
             # just have the goto label be the place the control exception
             # needs to send control to.
             if $handler {
-                my $where     := 0;
+                my $lablocal;
                 my $redo_mask := $HandlerCategory::redo;
                 my $next_mask := $HandlerCategory::next;
                 my $last_mask := $HandlerCategory::last;
-                if $label {
-                    $where     := nqp::where($label.value);
-                    $redo_mask := $redo_mask + $HandlerCategory::labeled;
-                    $next_mask := $next_mask + $HandlerCategory::labeled;
-                    $last_mask := $last_mask + $HandlerCategory::labeled;
+                my $il        := nqp::list();
+                if $label_wval {
+                    $redo_mask  := $redo_mask + $HandlerCategory::labeled;
+                    $next_mask  := $next_mask + $HandlerCategory::labeled;
+                    $last_mask  := $last_mask + $HandlerCategory::labeled;
+                    my $labmast := $qastcomp.as_mast($label_wval, :want($MVM_reg_obj)); #nqp::where($label.value);
+                    my $labreg  := $labmast.result_reg;
+                    $lablocal   := MAST::Local.new(:index($*MAST_FRAME.add_local(NQPMu)));
+                    push_ilist($il, $labmast);
+                    push_op($il, 'set', $lablocal, $labreg);
+                    $*REGALLOC.release_register($labreg, $MVM_reg_obj);
                 }
                 my @redo_il := [MAST::HandlerScope.new(
                     :instructions(@loop_il),
                     :category_mask($redo_mask),
                     :action($HandlerAction::unwind_and_goto),
                     :goto($redo_lbl),
-                    :label($where)
+                    :label($lablocal)
                 )];
                 my @next_il := [MAST::HandlerScope.new(
                     :instructions(@redo_il),
                     :category_mask($next_mask),
                     :action($HandlerAction::unwind_and_goto),
                     :goto($operands == 3 ?? $next_lbl !! $test_lbl),
-                    :label($where)
+                    :label($lablocal)
                 )];
-                my @last_il := [MAST::HandlerScope.new(
+                nqp::push($il, MAST::HandlerScope.new(
                     :instructions(@next_il),
                     :category_mask($last_mask),
                     :action($HandlerAction::unwind_and_goto),
                     :goto($done_lbl),
-                    :label($where)
-                )];
-                nqp::push(@last_il, $done_lbl);
-                MAST::InstructionList.new(@last_il, $res_reg, $res_kind)
+                    :label($lablocal)
+                ));
+                nqp::push($il, $done_lbl);
+                MAST::InstructionList.new($il, $res_reg, $res_kind)
             }
             else {
                 nqp::push(@loop_il, $done_lbl);
@@ -1105,10 +1111,10 @@ for ('', 'repeat_') -> $repness {
 QAST::MASTOperations.add_core_op('for', -> $qastcomp, $op {
     my $handler := 1;
     my @operands;
-    my $label;
+    my $label_wval;
     for $op.list {
         if $_.named eq 'nohandler' { $handler := 0; }
-        elsif $_.named eq 'label' { $label := $_; }
+        elsif $_.named eq 'label' { $label_wval := $_; }
         else { @operands.push($_) }
     }
 
@@ -1180,15 +1186,20 @@ QAST::MASTOperations.add_core_op('for', -> $qastcomp, $op {
 
     # Emit postlude, wrapping in handlers if needed.
     if $handler {
-        my $where     := 0;
+        my $lablocal;
         my $redo_mask := $HandlerCategory::redo;
         my $next_mask := $HandlerCategory::next;
         my $last_mask := $HandlerCategory::last;
-        if $label {
-            $where     := nqp::where($label.value);
-            $redo_mask := $redo_mask + $HandlerCategory::labeled;
-            $next_mask := $next_mask + $HandlerCategory::labeled;
-            $last_mask := $last_mask + $HandlerCategory::labeled;
+        if $label_wval {
+            $redo_mask  := $redo_mask + $HandlerCategory::labeled;
+            $next_mask  := $next_mask + $HandlerCategory::labeled;
+            $last_mask  := $last_mask + $HandlerCategory::labeled;
+            my $labmast := $qastcomp.as_mast($label_wval, :want($MVM_reg_obj));
+            my $labreg  := $labmast.result_reg;
+            $lablocal   := MAST::Local.new(:index($*MAST_FRAME.add_local(NQPMu)));
+            push_ilist($il, $labmast);
+            push_op($il, 'set', $lablocal, $labreg);
+            $*REGALLOC.release_register($labreg, $MVM_reg_obj);
         }
         my @ins_wrap := $loop_il.instructions;
         @ins_wrap := [MAST::HandlerScope.new(
@@ -1196,21 +1207,21 @@ QAST::MASTOperations.add_core_op('for', -> $qastcomp, $op {
             :category_mask($redo_mask),
             :action($HandlerAction::unwind_and_goto),
             :goto($lbl_redo),
-            :label($where)
+            :label($lablocal)
         )];
         @ins_wrap := [MAST::HandlerScope.new(
             :instructions(@ins_wrap),
             :category_mask($next_mask),
             :action($HandlerAction::unwind_and_goto),
             :goto($lbl_next),
-            :label($where)
+            :label($lablocal)
         )];
         nqp::push($il, MAST::HandlerScope.new(
             :instructions(@ins_wrap),
             :category_mask($last_mask),
             :action($HandlerAction::unwind_and_goto),
             :goto($lbl_done),
-            :label($where)
+            :label($lablocal)
         ));
     }
     else {
@@ -1559,6 +1570,7 @@ QAST::MASTOperations.add_core_op('handle', sub ($qastcomp, $op) {
 
     # Otherwise, we need to generate and install a handler block, which will
     # decide that to do by category.
+    my $il := nqp::list();
     my $mask := 0;
     my $hblock := QAST::Block.new(
         QAST::Op.new(
@@ -1569,33 +1581,16 @@ QAST::MASTOperations.add_core_op('handle', sub ($qastcomp, $op) {
                 QAST::Op.new( :op('exception') )
             )));
     my $push_target := $hblock;
-    my $has_label   := 0;
+    my $lablocal;
     for @children -> $type, $handler {
         if $type eq 'LABELED' {
-            $has_label := 1;
-            $mask      := $HandlerCategory::handler;
-            # Rethrow if a label was requested for which we are not in charge for.
-            $hblock.push(
-                QAST::Op.new(
-                    :op('if'),
-                    QAST::Op.new(
-                        :op('bitand_i'),
-                        QAST::Var.new( :name('__category__'), :scope('local') ),
-                        QAST::IVal.new( :value($HandlerCategory::labeled) )
-                    ),
-                    QAST::Op.new(
-                        :op('unless'),
-                        QAST::Op.new(
-                            :op('iseq_i'),
-                            QAST::Op.new( :op('where'),
-                                QAST::Op.new( :op('getpayload'), QAST::Op.new( :op('exception') ) )
-                            ),
-                            QAST::Op.new( :op('where'), $handler )
-                        ),
-                        QAST::Op.new( :op('rethrow'), QAST::Op.new( :op('exception') ) )
-                    )
-                )
-            );
+            $mask       := $HandlerCategory::labeled;
+            my $labmast := $qastcomp.as_mast($handler, :want($MVM_reg_obj));
+            my $labreg  := $labmast.result_reg;
+            $lablocal   := MAST::Local.new(:index($*MAST_FRAME.add_local(NQPMu)));
+            push_ilist($il, $labmast);
+            push_op($il, 'set', $lablocal, $labreg);
+            $*REGALLOC.release_register($labreg, $MVM_reg_obj);
         }
         else {
             # Get the category mask.
@@ -1625,7 +1620,6 @@ QAST::MASTOperations.add_core_op('handle', sub ($qastcomp, $op) {
 
     # Add a local and store the handler block into it.
     my $hblocal := MAST::Local.new(:index($*MAST_FRAME.add_local(NQPMu)));
-    my $il      := nqp::list();
     my $hbmast  := $qastcomp.as_mast($hblock, :want($MVM_reg_obj));
     push_ilist($il, $hbmast);
     push_op($il, 'set', $hblocal, $hbmast.result_reg);
@@ -1639,7 +1633,8 @@ QAST::MASTOperations.add_core_op('handle', sub ($qastcomp, $op) {
     push_op($protil.instructions, 'goto', $endlbl);
     nqp::push($il, MAST::HandlerScope.new(
         :instructions($protil.instructions), :goto($uwlbl), :block($hblocal),
-        :category_mask($mask), :action($HandlerAction::invoke_and_we'll_see)));
+        :category_mask($mask), :action($HandlerAction::invoke_and_we'll_see),
+        :label($lablocal)));
     nqp::push($il, $uwlbl);
     push_op($il, 'takehandlerresult', $protil.result_reg);
     nqp::push($il, $endlbl);
