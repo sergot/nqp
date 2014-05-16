@@ -139,6 +139,7 @@ all:
             tc.unwinder.unwindTarget = handlerInfo[0];
             tc.unwinder.unwindCompUnit = handlerFrame.codeRef.staticInfo.compUnit;
             tc.unwinder.category = category;
+            tc.unwinder.payload = null;
             throw tc.unwinder;
         case EX_UNWIND_OBJECT:
             tc.unwinder.unwindTarget = handlerInfo[0];
@@ -146,6 +147,8 @@ all:
             tc.unwinder.category = category;
             if (exObj != null)
                 tc.unwinder.payload = (SixModelObject)exObj.payload;
+            else
+                tc.unwinder.payload = null;
             throw tc.unwinder;
         case EX_BLOCK:
             try {
@@ -175,6 +178,7 @@ all:
             finally {
                 tc.handlers.remove(tc.handlers.size() - 1);
             }
+            tc.unwinder.category = category;
             tc.unwinder.unwindTarget = handlerInfo[0];
             tc.unwinder.unwindCompUnit = handlerFrame.codeRef.staticInfo.compUnit;
             tc.unwinder.result = Ops.result_o(tc.curFrame);

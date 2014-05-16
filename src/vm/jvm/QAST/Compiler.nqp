@@ -4423,11 +4423,21 @@ class QAST::CompilerJAST {
 
         unless $handler_cares {
             $il.append($DUP);
-            $il.append(JAST::PushIVal.new( :value($label ?? nqp::where($label.value) !! 0) ));
-            $il.append(JAST::PushIVal.new( :value($outer) ));
-            $il.append(JAST::Instruction.new( :op('aload'), 'tc' ));
-            $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS, '_is_same_label',
-                'Void', $TYPE_EX_UNWIND, 'Long', 'Long', $TYPE_TC ));
+            if $label {
+                my $labjast := self.as_jast($label, :want($RT_OBJ));
+                $il.append($labjast.jast);
+                $*STACK.obtain($il, $labjast);
+                $il.append(JAST::PushIVal.new( :value($outer) ));
+                $il.append(JAST::Instruction.new( :op('aload'), 'tc' ));
+                $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS, '_is_same_label',
+                    'Void', $TYPE_EX_UNWIND, $TYPE_SMO, 'Long', $TYPE_TC ));
+            }
+            else {
+                $il.append(JAST::PushIVal.new( :value($outer) ));
+                $il.append(JAST::Instruction.new( :op('aload'), 'tc' ));
+                $il.append(JAST::Instruction.new( :op('invokestatic'), $TYPE_OPS, '_rethrow_label',
+                    'Void', $TYPE_EX_UNWIND, 'Long', $TYPE_TC ));
+            }
         }
     }
     

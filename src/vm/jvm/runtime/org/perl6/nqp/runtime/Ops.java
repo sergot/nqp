@@ -4528,18 +4528,33 @@ public final class Ops {
             throw ExceptionHandling.dieInternal(tc, "throw needs an object with VMException representation");
         }
     }
-    public static void _is_same_label(UnwindException uwex, long where, long outerHandler, ThreadContext tc) {
+    public static void _is_same_label(UnwindException uwex, SixModelObject where, long outerHandler, ThreadContext tc) {
         if ((uwex.category & ExceptionHandling.EX_CAT_LABELED) == 0)
             return;
 
         if (uwex instanceof UnwindException) {
-            SixModelObject payload = uwex.payload;
-            if (payload.hashCode() == where)
+            if (uwex.payload.hashCode() == where.hashCode())
                 return;
+            VMExceptionInstance vmex = (VMExceptionInstance)newexception(tc);
+            /* We're moving to the outside so we do not rethrow to us. */
+            vmex.category = uwex.category;
+            vmex.payload = uwex.payload;
+            tc.curFrame.curHandler = outerHandler;
+            ExceptionHandling.handlerDynamic(tc, vmex.category, false, vmex);
+        }
+        else {
+            throw ExceptionHandling.dieInternal(tc, "_is_same_label needs an object with UnwindException representation");
+        }
+    }
+    public static void _rethrow_label(UnwindException uwex, long outerHandler, ThreadContext tc) {
+        if ((uwex.category & ExceptionHandling.EX_CAT_LABELED) == 0)
+            return;
+
+        if (uwex instanceof UnwindException) {
             /* We're moving to the outside so we do not rethrow to us. */
             VMExceptionInstance vmex = (VMExceptionInstance)newexception(tc);
             vmex.category = uwex.category;
-            vmex.payload = payload;
+            vmex.payload = uwex.payload;
             tc.curFrame.curHandler = outerHandler;
             ExceptionHandling.handlerDynamic(tc, vmex.category, false, vmex);
         }
